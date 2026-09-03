@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Control - Encargado de Guardia</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f6f9; }
+        .table-sm td, .table-sm th { font-size: 0.875rem; }
+    </style>
+</head>
+<body>
+
+<div class="container py-4">
+    <!-- Cabecera del Panel -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
+        <div>
+            <h3 id="tituloAdmin" class="fw-bold text-dark m-0">Panel de Control de Guardias</h3>
+            <p class="text-muted small m-0">Vista exclusiva para el Encargado de Guardia</p>
+        </div>
+
+        <!-- Selector de Mes y Acciones -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div class="bg-white p-1 px-2 border rounded d-flex align-items-center gap-1 shadow-sm">
+                <span class="small fw-bold text-secondary">Mes:</span>
+                <select id="selectMes" class="form-select form-select-sm w-auto border-0 fw-bold text-primary">
+                    <option value="1">Enero</option>
+                    <option value="2">Febrero</option>
+                    <option value="3">Marzo</option>
+                    <option value="4">Abril</option>
+                    <option value="5">Mayo</option>
+                    <option value="6">Junio</option>
+                    <option value="7">Julio</option>
+                    <option value="8">Agosto</option>
+                    <option value="9">Septiembre</option>
+                    <option value="10">Octubre</option>
+                    <option value="11">Noviembre</option>
+                    <option value="12">Diciembre</option>
+                </select>
+                <select id="selectAño" class="form-select form-select-sm w-auto border-0 fw-bold text-primary">
+                    <option value="2026">2026</option>
+                    <option value="2027">2027</option>
+                </select>
+                <button onclick="cambiarMes()" class="btn btn-sm btn-outline-primary fw-bold">Cargar</button>
+            </div>
+
+            <a href="/admin/exportar-excel" class="btn btn-success fw-bold shadow-sm">
+                📊 Descargar Excel del Mes
+            </a>
+            <button onclick="reiniciarMes()" class="btn btn-outline-danger btn-sm">
+                🔄 Reiniciar Mes
+            </button>
+        </div>
+    </div>
+
+    <!-- Tablas en Paralelo -->
+    <div class="row g-4">
+        <!-- Tabla Guardias Oficiales -->
+        <div class="col-12 col-lg-6">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white fw-bold py-2 d-flex justify-content-between align-items-center">
+                    <span>🛡️ Guardias Oficiales</span>
+                    <span id="badgeCantOficiales" class="badge bg-light text-primary">0 Reservas</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 550px;">
+                        <table class="table table-hover table-striped align-middle mb-0 table-sm">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Estado</th>
+                                    <th>Jerarquía</th>
+                                    <th>Personal</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tablaOficiales"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabla Guardias Disponibles -->
+        <div class="col-12 col-lg-6">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-warning text-dark fw-bold py-2 d-flex justify-content-between align-items-center">
+                    <span>🔄 Guardias Disponibles</span>
+                    <span id="badgeCantDisponibles" class="badge bg-dark text-white">0 Reservas</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 550px;">
+                        <table class="table table-hover table-striped align-middle mb-0 table-sm">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Estado</th>
+                                    <th>Jerarquía</th>
+                                    <th>Personal</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tablaDisponibles"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+    const socket = io();
+    const selectMes = document.getElementById('selectMes');
+    const selectAño = document.getElementById('selectAño');
+    const tituloAdmin = document.getElementById('tituloAdmin');
+
+    socket.on('connect', () => {
+        socket.emit('obtenerFechas');
+    });
+
+    socket.on('cargarFechas', (data) => {
+        procesarDatos(data);
+    });
+
+    socket.on('actualizarFechas', (data) => {
+        procesarDatos(data);
+    });
+
+    function procesarDatos(data) {
+        if (data.infoMes) {
+            tituloAdmin.innerText = `Panel de Control: Guardias ${data.infoMes.mesNombre} ${data.infoMes.año}`;
+            selectMes.value = data.infoMes.mesNumero;
+            selectAño.value = data.infoMes.año;
+        }
+
+        renderizarTabla(data.oficiales, 'tablaOficiales', 'badgeCantOficiales');
+        renderizarTabla(data.disponibles, 'tablaDisponibles', 'badgeCantDisponibles');
+    }
+
+    function cambiarMes() {
+        const m = selectMes.value;
+        const a = selectAño.value;
+        socket.emit('solicitarCambioMes', { mes: m, año: a });
+    }
+
+    function renderizarTabla(fechas, idTabla, idBadge) {
+        const tbody = document.getElementById(idTabla);
+        tbody.innerHTML = '';
+
+        if (!fechas) return;
+
+        let totalReservas = 0;
+
+        fechas.forEach(f => {
+            const esReservado = f.estado === 'reservado';
+            if (esReservado) totalReservas++;
+
+            const tr = document.createElement('tr');
+            
+            tr.innerHTML = `
+                <td class="fw-bold">${f.fecha}</td>
+                <td>
+                    <span class="badge ${esReservado ? 'bg-danger' : 'bg-success'}">
+                        ${esReservado ? 'RESERVADO' : 'LIBRE'}
+                    </span>
+                </td>
+                <td>${esReservado ? f.agente.jerarquia : '-'}</td>
+                <td class="fw-bold text-uppercase">${esReservado ? `${f.agente.apellido}, ${f.agente.nombre}` : '<span class="text-muted fw-normal">Sin Asignar</span>'}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        document.getElementById(idBadge).innerText = `${totalReservas} Reservadas`;
+    }
+
+    function reiniciarMes() {
+        Swal.fire({
+            title: '¿Reiniciar todas las guardias del mes activo?',
+            text: 'Esta acción borrará todas las reservas asignadas en este mes.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            confirmButtonText: 'Sí, reiniciar'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                fetch('/admin/reiniciar-mes')
+                    .then(() => Swal.fire('Reiniciado', 'Las guardias del mes actual han sido limpiadas.', 'success'));
+            }
+        });
+    }
+</script>
+
+</body>
+</html>
