@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import basicAuth from 'express-basic-auth';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -8,9 +9,25 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+
+
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer);
+const io = new Server(httpServer,{
+    pingTimeout: 300000,  // 5 minutos de inactividad sin respuesta (300,000 ms)
+    pingInterval: 25000,  // Revisa el estado de la conexión cada 25 segundos
+    connectTimeout: 30000 // Tiempo máximo para establecer la conexión inicial
+});
+
+// Configuración de clave para el Administrador / Encargado
+const seguridadAdmin = basicAuth({
+    users: { 'esub': '*guardia/9595' }, // Usuario: admin | Contraseña: tu_clave_aqui
+    challenge: true, // Hace que el navegador muestre la ventana flotante de inicio de sesión
+    unauthorizedResponse: 'Acceso no autorizado al Panel de Control de la PNA.'
+});
+
+// Aplicar la protección ÚNICAMENTE a las rutas que empiezan con /admin
+app.use('/admin', seguridadAdmin);
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -111,7 +128,7 @@ io.on('connection', (socket) => {
         if (fechaItem.estado !== 'disponible') {
             socket.emit('resultadoReserva', { 
                 exito: false, 
-                mensaje: '¡Esta fecha ya está reservada por otro agente!' 
+                mensaje: '¡Esta fecha ya está reservada por otro personal!' 
             });
             return;
         }
@@ -196,7 +213,29 @@ app.get('/admin/exportar-excel', async (req, res) => {
         res.status(500).send('Error al generar Excel.');
     }
 });
+// -------------------------------------------------------------
+// ELIMINAR REGISTROS DE UN MES ESPECÍFICO (ADMIN)
+// -------------------------------------------------------------
+app.get('/admin/eliminar-mes', (req, res) => {
+    const mes = Number(req.query.mes) || 10;
+    const año = Number(req.query.año) || 2026;
+    const clave = `${año}-${String(mes).padStart(2, '0')}`;
 
+    if (baseDatosGuardias[clave]) {
+        delete baseDatosGuardias[clave]; // Borra el mes completamente de la memoria
+    }
+
+    // Volver a inicializar las fechas limpias para el mes consultado
+    const datosNuevos = obtenerOCrearMes(mes, año);
+
+    // Notificar a todos los usuarios conectados para actualizar la vista
+    io.emit('actualizarFechas', datosNuevos);
+    
+    res.json({ exito: true, mensaje: `Se eliminaron todos los registros del mes ${mes}/${año}.` });
+});
+// -------------------------------------------------------------
+// REINICIAR MES
+// -------------------------------------------------------------
 app.get('/admin/reiniciar-mes', (req, res) => {
     const mes = Number(req.query.mes) || 10;
     const año = Number(req.query.año) || 2026;

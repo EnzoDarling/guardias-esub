@@ -12,11 +12,26 @@
     </style>
 </head>
 <body>
-
+<!-- Barra de Navegación Unificada (Index) -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4 shadow-sm">
+    <div class="container">
+        <a class="navbar-brand fw-bold" href="/">
+            ⚓ Reserva de Guardias PNA
+        </a>
+        <div class="d-flex gap-2">
+            <a href="/" class="btn btn-light btn-sm fw-bold active">
+                🏠 Inicio
+            </a>
+            <a href="/admin" class="btn btn-warning btn-sm fw-bold">
+                ⚙️ Gestionar
+            </a>
+        </div>
+    </div>
+</nav>
 <div class="container py-4" style="max-width: 650px;">
     <div class="text-center mb-3">
         <h3 id="tituloMes" class="fw-bold text-primary">Guardias PNA</h3>
-        <p class="text-muted small mb-2">Selección e Inscripción de Guardias</p>
+        <p class="text-muted small mb-2">Selección de Guardias</p>
     </div>
 
     <!-- Selector de Mes y Año -->
@@ -51,7 +66,7 @@
             <h6 class="card-title fw-bold text-secondary mb-3">Datos del Agente</h6>
             <div class="row g-3">
                 <div class="col-12">
-                    <label class="form-label small fw-bold">1. Jerarquía</label>
+                    <label class="form-label small fw-bold">1. JERARQUÍA</label>
                     <select id="selectJerarquia" class="form-select">
                         <option value="" selected disabled>-- Seleccionar Jerarquía --</option>
                         <option value="AI">AI</option>
