@@ -80,18 +80,17 @@ app.get('/admin/exportar-excel', seguridadAdmin, async (req, res) => {
     const claveMes = `${año}-${String(mes).padStart(2, '0')}`;
 
     try {
-        // Consultar reservas desde la base de datos PostgreSQL
+        // Consulta SQL con TRIM para asegurar la coincidencia de DNI
         const query = `
             SELECT r.id_fecha, r.tipo_guardia, r.reservado_en,
                    u.dni, u.jerarquia, u.apellido, u.nombre
             FROM reservas r
-            JOIN usuarios u ON r.dni_agente = u.dni
+            JOIN usuarios u ON TRIM(r.dni_agente) = TRIM(u.dni)
             WHERE r.clave_mes = $1
             ORDER BY r.id_fecha ASC, r.tipo_guardia ASC;
         `;
         const result = await pool.query(query, [claveMes]);
 
-        // Crear el archivo de Excel
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet(`Guardias ${claveMes}`);
 
@@ -105,7 +104,6 @@ app.get('/admin/exportar-excel', seguridadAdmin, async (req, res) => {
             { header: 'Fecha de Reserva', key: 'reservadoEn', width: 22 }
         ];
 
-        // Formato para el encabezado
         worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFF' } };
         worksheet.getRow(1).fill = {
             type: 'pattern',
@@ -117,28 +115,22 @@ app.get('/admin/exportar-excel', seguridadAdmin, async (req, res) => {
             worksheet.addRow({
                 dia: row.id_fecha,
                 tipo: row.tipo_guardia === 'oficial' ? 'Guardia Oficial' : 'Guardia Disponible',
-                jerarquia: row.jerarquia,
-                apellido: row.apellido,
-                nombre: row.nombre,
-                dni: row.dni,
-                reservadoEn: new Date(row.reservado_en).toLocaleString('es-AR')
+                jerarquia: row.jerarquia || '',
+                apellido: row.apellido || '',
+                nombre: row.nombre || '',
+                dni: row.dni || '',
+                reservadoEn: row.reservado_en ? new Date(row.reservado_en).toLocaleString('es-AR') : ''
             });
         });
 
-        res.setHeader(
-            'Content-Type',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        );
-        res.setHeader(
-            'Content-Disposition',
-            `attachment; filename=Guardias_${claveMes}.xlsx`
-        );
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=Guardias_${claveMes}.xlsx`);
 
         await workbook.xlsx.write(res);
         res.end();
 
     } catch (error) {
-        console.error('Error al exportar Excel:', error);
+        console.error('>>> Error en /admin/exportar-excel:', error);
         res.status(500).send('Error al generar la planilla de Excel.');
     }
 });
