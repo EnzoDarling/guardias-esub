@@ -11,6 +11,7 @@
     </style>
 </head>
 <body>
+
 <!-- Barra de Navegación Unificada (Admin) -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4 shadow-sm">
     <div class="container">
@@ -27,6 +28,7 @@
         </div>
     </div>
 </nav>
+
 <div class="container py-4">
     <!-- Cabecera del Panel -->
     <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
@@ -60,14 +62,11 @@
                 <button onclick="cambiarMes()" class="btn btn-sm btn-outline-primary fw-bold">Cargar</button>
             </div>
 
-            <a href="/admin/exportar-excel" class="btn btn-success fw-bold shadow-sm">
+            <a id="btnExportarExcel" href="/admin/exportar-excel" class="btn btn-success fw-bold shadow-sm">
                 📊 Descargar Excel del Mes
             </a>
             <button onclick="reiniciarMes()" class="btn btn-outline-danger btn-sm">
                 🔄 Reiniciar Mes
-            </button>
-            <button class="btn btn-outline-danger me-2" onclick="confirmarEliminarMes()">
-                🗑️ Eliminar Registros del Mes
             </button>
         </div>
     </div>
@@ -133,9 +132,11 @@
     const selectMes = document.getElementById('selectMes');
     const selectAño = document.getElementById('selectAño');
     const tituloAdmin = document.getElementById('tituloAdmin');
+    const btnExportarExcel = document.getElementById('btnExportarExcel');
 
+    // Al conectar, solicita las fechas del mes actual
     socket.on('connect', () => {
-        socket.emit('obtenerFechas');
+        solicitarFechas();
     });
 
     socket.on('cargarFechas', (data) => {
@@ -146,21 +147,30 @@
         procesarDatos(data);
     });
 
+    function solicitarFechas() {
+        const m = selectMes.value;
+        const a = selectAño.value;
+        socket.emit('obtenerFechas', { mes: m, año: a });
+    }
+
     function procesarDatos(data) {
         if (data.infoMes) {
             tituloAdmin.innerText = `Panel de Control: Guardias ${data.infoMes.mesNombre} ${data.infoMes.año}`;
             selectMes.value = data.infoMes.mesNumero;
             selectAño.value = data.infoMes.año;
+            actualizarEnlaceExcel(data.infoMes.mesNumero, data.infoMes.año);
         }
 
         renderizarTabla(data.oficiales, 'tablaOficiales', 'badgeCantOficiales');
         renderizarTabla(data.disponibles, 'tablaDisponibles', 'badgeCantDisponibles');
     }
 
+    function actualizarEnlaceExcel(mes, año) {
+        btnExportarExcel.href = `/admin/exportar-excel?mes=${mes}&año=${año}`;
+    }
+
     function cambiarMes() {
-        const m = selectMes.value;
-        const a = selectAño.value;
-        socket.emit('solicitarCambioMes', { mes: m, año: a });
+        solicitarFechas();
     }
 
     function renderizarTabla(fechas, idTabla, idBadge) {
@@ -193,56 +203,37 @@
         document.getElementById(idBadge).innerText = `${totalReservas} Reservadas`;
     }
 
+    // Reiniciar / Liberar las reservas del mes seleccionado
     function reiniciarMes() {
+        const mes = Number(selectMes.value);
+        const año = Number(selectAño.value);
+        const nombreMes = selectMes.options[selectMes.selectedIndex].text;
+
         Swal.fire({
-            title: '¿Reiniciar todas las guardias del mes activo?',
-            text: 'Esta acción borrará todas las reservas asignadas en este mes.',
+            title: `¿Reiniciar guardias de ${nombreMes} ${año}?`,
+            text: `Se liberarán TODAS las reservas de este mes. Esta acción no se puede deshacer.`,
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonColor: '#dc3545',
-            confirmButtonText: 'Sí, reiniciar'
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#6c757d',
+            confirmButtonText: 'Sí, reiniciar mes',
+            cancelButtonText: 'Cancelar'
         }).then((result) => {
             if (result.isConfirmed) {
-                fetch('/admin/reiniciar-mes')
-                    .then(() => Swal.fire('Reiniciado', 'Las guardias del mes actual han sido limpiadas.', 'success'));
+                socket.emit('reiniciarMes', { mes, año });
             }
         });
     }
-    async function confirmarEliminarMes() {
-    const selectMes = document.getElementById('selectMesAdmin');
-    const selectAño = document.getElementById('selectAñoAdmin');
-    const mes = selectMes.value;
-    const año = selectAño.value;
-    const nombreMes = selectMes.options[selectMes.selectedIndex].text;
 
-    const result = await Swal.fire({
-        title: `¿Eliminar registros de ${nombreMes} ${año}?`,
-        text: "Esta acción borrará todas las reservas de este mes de la memoria. Se recomienda haber descargado el Excel previamente.",
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#d33',
-        cancelButtonColor: '#3085d6',
-        confirmButtonText: 'Sí, eliminar mes',
-        cancelButtonText: 'Cancelar'
-    });
-
-    if (result.isConfirmed) {
-        try {
-            const response = await fetch(`/admin/eliminar-mes?mes=${mes}&año=${año}`);
-            const data = await response.json();
-
-            if (data.exito) {
-                Swal.fire(
-                    '¡Eliminado!',
-                    `Los registros de ${nombreMes} han sido eliminados correctamente.`,
-                    'success'
-                );
-            }
-        } catch (error) {
-            Swal.fire('Error', 'No se pudo eliminar el mes.', 'error');
+    // Listener único de respuesta para el reinicio
+    socket.on('resultadoReiniciarMes', (res) => {
+        if (res.exito) {
+            Swal.fire('¡Éxito!', res.mensaje, 'success');
+            solicitarFechas(); 
+        } else {
+            Swal.fire('Error', res.mensaje || 'No se pudo reiniciar el mes.', 'error');
         }
-    }
-}
+    });
 </script>
 
 </body>

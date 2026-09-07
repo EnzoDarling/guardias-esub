@@ -3,41 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reserva de Guardias</title>
+    <title>Sistema de Guardias - ESUB</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f4f6f9; }
         .card-fecha { transition: all 0.2s ease; }
-        .reservado { background-color: #e9ecef; opacity: 0.75; }
+        .reservado-tercero { background-color: #e9ecef; opacity: 0.75; }
+        .reservado-propio { background-color: #d1e7dd; border: 2px solid #198754 !important; }
+        /* Blur o bloqueo para el contenido mientras no haya sesión */
+        .contenido-bloqueado {
+            filter: blur(4px);
+            pointer-events: none;
+            user-select: none;
+        }
+        /* Forzar visualmente mayúsculas en los campos de texto del registro */
+        .input-mayusculas {
+            text-transform: uppercase;
+        }
     </style>
 </head>
 <body>
-<!-- Barra de Navegación Unificada (Index) -->
+
+<!-- Barra de Navegación -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4 shadow-sm">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="/">
-            ⚓ Reserva de Guardias PNA
-        </a>
-        <div class="d-flex gap-2">
-            <a href="/" class="btn btn-light btn-sm fw-bold active">
-                🏠 Inicio
-            </a>
-            <a href="/admin" class="btn btn-warning btn-sm fw-bold">
-                ⚙️ Gestionar
-            </a>
+        <a class="navbar-brand fw-bold" href="/">⚓ SISTEMA DE GUARDIAS - ESUB</a>
+        <div class="d-flex align-items-center gap-2">
+            <span id="labelUsuario" class="text-white small me-2 fw-bold"></span>
+            <button id="btnCerrarSesion" class="btn btn-outline-light btn-sm fw-bold d-none" onclick="cerrarSesion()">Cerrar Sesión</button>
+            <a href="/admin" class="btn btn-warning btn-sm fw-bold ms-2">⚙️ Admin</a>
         </div>
     </div>
 </nav>
-<div class="container py-4" style="max-width: 650px;">
+
+<!-- CONTENIDO PRINCIPAL (Se bloquea si no está logueado) -->
+<div id="appContainer" class="container py-2 contenido-bloqueado" style="max-width: 750px;">
     <div class="text-center mb-3">
         <h3 id="tituloMes" class="fw-bold text-primary">Guardias PNA</h3>
-        <p class="text-muted small mb-2">Selección de Guardias</p>
+        <p class="text-muted small mb-1">Selección de fechas de guardia</p>
     </div>
 
     <!-- Selector de Mes y Año -->
     <div class="card shadow-sm mb-3 bg-light border-primary">
         <div class="card-body p-2 d-flex align-items-center justify-content-center gap-2">
-            <span class="fw-bold text-secondary small">Seleccionar Mes:</span>
+            <span class="fw-bold text-secondary small">Mes:</span>
             <select id="selectMes" class="form-select form-select-sm w-auto fw-bold text-primary">
                 <option value="1">Enero</option>
                 <option value="2">Febrero</option>
@@ -56,65 +65,180 @@
                 <option value="2026">2026</option>
                 <option value="2027">2027</option>
             </select>
-            <button onclick="cambiarMes()" class="btn btn-sm btn-primary fw-bold">Ver Fechas</button>
+            <button onclick="solicitarFechasActuales()" class="btn btn-sm btn-primary fw-bold">Ver Fechas</button>
         </div>
     </div>
 
-    <!-- 1. Datos del Agente -->
+    <!-- Datos del Agente -->
     <div class="card shadow-sm mb-4">
         <div class="card-body">
             <h6 class="card-title fw-bold text-secondary mb-3">Datos del Agente</h6>
-            <div class="row g-3">
-                <div class="col-12">
-                    <label class="form-label small fw-bold">1. JERARQUÍA</label>
-                    <select id="selectJerarquia" class="form-select">
-                        <option value="" selected disabled>-- Seleccionar Jerarquía --</option>
+            <div class="row g-2">
+                <div class="col-12 col-md-4">
+                    <label class="form-label small fw-bold">JERARQUÍA</label>
+                    <select id="selectJerarquia" class="form-select form-select-sm" disabled>
+                        <option value="" selected disabled>-- Seleccionar --</option>
                         <option value="AI">AI</option>
                         <option value="AS">AS</option>
                         <option value="AT">AT</option>
                     </select>
                 </div>
-                <div class="col-12 col-md-6">
-                    <label class="form-label small fw-bold">2. APELLIDO</label>
-                    <input type="text" id="inputApellido" class="form-control" placeholder="Ingrese Apellido">
+                <div class="col-12 col-md-4">
+                    <label class="form-label small fw-bold">APELLIDO</label>
+                    <input type="text" id="inputApellido" class="form-control form-control-sm input-mayusculas" placeholder="Apellido" readonly>
                 </div>
-                <div class="col-12 col-md-6">
-                    <label class="form-label small fw-bold">3. NOMBRE</label>
-                    <input type="text" id="inputNombre" class="form-control" placeholder="Ingrese Nombre">
+                <div class="col-12 col-md-4">
+                    <label class="form-label small fw-bold">NOMBRE</label>
+                    <input type="text" id="inputNombre" class="form-control form-control-sm input-mayusculas" placeholder="Nombre" readonly>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Pestañas para los 2 tipos de Guardia -->
+    <!-- Pestañas para tipos de Guardia -->
     <ul class="nav nav-pills nav-justified mb-3" id="pills-tab" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active fw-bold" id="pills-oficial-tab" data-bs-toggle="pill" data-bs-target="#pills-oficial" type="button" role="tab">
+        <li class="nav-item">
+            <button class="nav-link active fw-bold" id="pills-oficial-tab" data-bs-toggle="pill" data-bs-target="#pills-oficial" type="button">
                 🛡️ Guardia Oficial
             </button>
         </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link fw-bold" id="pills-disponible-tab" data-bs-toggle="pill" data-bs-target="#pills-disponible" type="button" role="tab">
-                🔄 Guardia Disponibles
+        <li class="nav-item">
+            <button class="nav-link fw-bold" id="pills-disponible-tab" data-bs-toggle="pill" data-bs-target="#pills-disponible" type="button">
+                🔄 Guardia Disponible
             </button>
         </li>
     </ul>
 
     <div class="tab-content" id="pills-tabContent">
-        <!-- SECCIÓN 1: GUARDIAS OFICIALES -->
-        <div class="tab-pane fade show active" id="pills-oficial" role="tabpanel">
-            <div class="alert alert-info py-2 small mb-3">
-                Fechas correspondientes al Servicio de Guardia Turno Noche.
+        <div class="tab-pane fade show active" id="pills-oficial">
+            <div class="alert alert-info py-2 small mb-3 d-flex justify-content-between align-items-center">
+                <span>Máximo 1 Guardia Oficial por mes.</span>
+                <span id="contadorDesreservasOficial" class="fw-bold">Cancelaciones disponibles: 3/3</span>
             </div>
             <div id="contenedorOficiales" class="row g-2"></div>
         </div>
 
-        <!-- SECCIÓN 2: GUARDIAS DISPONIBLES (CUBRETURNOS) -->
-        <div class="tab-pane fade" id="pills-disponible" role="tabpanel">
-            <div class="alert alert-warning py-2 small mb-3">
-                Fechas de Guardia Disponible Turno Noche.
+        <div class="tab-pane fade" id="pills-disponible">
+            <div class="alert alert-warning py-2 small mb-3 d-flex justify-content-between align-items-center">
+                <span>Máximo 1 Guardia Disponible por mes.</span>
+                <span id="contadorDesreservasDisponible" class="fw-bold">Cancelaciones disponibles: 3/3</span>
             </div>
             <div id="contenedorDisponibles" class="row g-2"></div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL DE ACCESO OBLIGATORIO (LOGIN) -->
+<div class="modal fade" id="modalLogin" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow-lg">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title fw-bold">🔑 Acceso al Sistema de Guardias</h5>
+            </div>
+            <div class="modal-body p-4">
+                <p class="text-muted small text-center mb-3">Ingresa tus credenciales para acceder al calendario de guardias.</p>
+                <form id="formLogin" onsubmit="ejecutarLogin(event)">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">DNI (Usuario)</label>
+                        <input type="text" id="loginDni" class="form-control" placeholder="Ingrese su DNI sin puntos" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold small">Contraseña</label>
+                        <input type="password" id="loginPass" class="form-control" placeholder="Ingrese su clave" required>
+                    </div>
+                    <div class="text-end mb-3">
+                        <a href="#" onclick="abrirModalResetPass()" class="small text-decoration-none text-muted">¿Olvidaste tu contraseña?</a>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 fw-bold py-2">Iniciar Sesión</button>
+                </form>
+            </div>
+            <div class="modal-footer justify-content-center bg-light">
+                <p class="mb-0 small text-muted">¿No tienes cuenta registrada? 
+                    <a href="#" onclick="abrirModalRegistro()" class="fw-bold text-primary">Registrarse aquí</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL DE RESTABLECER CONTRASEÑA -->
+
+<div class="modal fade" id="modalResetPass" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title fw-bold">
+                    <i class="bi bi-arrow-counterclockwise"></i> Restablecer Contraseña
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted text-center">Ingresa tu DNI y escribe tu nueva contraseña.</p>
+                
+                <!-- IMPORTANTE: id="formResetPass" -->
+                <form id="formResetPass">
+                    <div class="mb-3">
+                        <label for="resetDni" class="form-label fw-bold">DNI</label>
+                        <!-- IMPORTANTE: id="resetDni" -->
+                        <input type="text" class="form-control" id="resetDni" placeholder="Ingresa tu DNI" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="resetNuevaPass" class="form-label fw-bold">Nueva Contraseña</label>
+                        <!-- IMPORTANTE: id="resetNuevaPass" -->
+                        <input type="password" class="form-control" id="resetNuevaPass" placeholder="Mínimo 3 caracteres" required>
+                    </div>
+                    <button type="submit" class="btn btn-warning w-100 fw-bold mt-2">Cambiar Contraseña</button>
+                </form>
+            </div>
+            <div class="modal-footer justify-content-center">
+                <small class="text-muted">¿Recordaste tu clave? <a href="#" onclick="abrirModalLogin()" class="fw-bold">Volver al Login</a></small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL DE REGISTRO OBLIGATORIO -->
+<div class="modal fade" id="modalRegistro" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow-lg">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title fw-bold">📝 Registro de Nuevo Agente</h5>
+            </div>
+            <div class="modal-body p-4">
+                <form id="formRegistro" onsubmit="ejecutarRegistro(event)">
+                    <div class="mb-2">
+                        <label class="form-label fw-bold small">DNI</label>
+                        <input type="text" id="regDni" class="form-control form-control-sm" placeholder="Sin puntos ni espacios" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold small">Contraseña</label>
+                        <input type="password" id="regPass" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold small">Jerarquía</label>
+                        <select id="regJerarquia" class="form-select form-select-sm" required>
+                            <option value="" selected disabled>-- Seleccionar --</option>
+                            <option value="AI">AI</option>
+                            <option value="AS">AS</option>
+                            <option value="AT">AT</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold small">Apellido</label>
+                        <input type="text" id="regApellido" class="form-control form-control-sm input-mayusculas" placeholder="EJ: PEREZ" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">Nombre</label>
+                        <input type="text" id="regNombre" class="form-control form-control-sm input-mayusculas" placeholder="EJ: JUAN" required>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100 fw-bold py-2">Completar Registro</button>
+                </form>
+            </div>
+            <div class="modal-footer justify-content-center bg-light">
+                <p class="mb-0 small text-muted">¿Ya tienes una cuenta? 
+                    <a href="#" onclick="abrirModalLogin()" class="fw-bold text-success">Iniciar Sesión</a>
+                </p>
+            </div>
         </div>
     </div>
 </div>
@@ -125,118 +249,340 @@
 
 <script>
     const socket = io();
-    const contenedorOficiales = document.getElementById('contenedorOficiales');
-    const contenedorDisponibles = document.getElementById('contenedorDisponibles');
-    const tituloMes = document.getElementById('tituloMes');
+
+    // Variables globales
+    let usuarioLogueado = null;
+    let cancelacionesUsadas = 0;
+    let bsModalLogin = null;
+    let bsModalRegistro = null;
+    let bsModalResetPass = null;
+
+    // Elementos del DOM
     const selectMes = document.getElementById('selectMes');
     const selectAño = document.getElementById('selectAño');
+    const appContainer = document.getElementById('appContainer');
 
-    socket.on('connect', () => {
-        socket.emit('obtenerFechas');
+    // Inicialización del mes y año actual por defecto
+    const hoy = new Date();
+    selectMes.value = hoy.getMonth() + 1;
+    selectAño.value = hoy.getFullYear();
+
+    document.addEventListener('DOMContentLoaded', () => {
+        bsModalLogin = new bootstrap.Modal(document.getElementById('modalLogin'));
+        bsModalRegistro = new bootstrap.Modal(document.getElementById('modalRegistro'));
+        bsModalResetPass = new bootstrap.Modal(document.getElementById('modalResetPass'));
+
+        const usuarioGuardado = localStorage.getItem('usuarioGuardia');
+        if (usuarioGuardado) {
+            usuarioLogueado = JSON.parse(usuarioGuardado);
+            mostrarInterfazPrincipal();
+        } else {
+            mostrarModalLogin();
+        }
     });
 
+    // FUNCIONES DE CONTROL DE VISTAS Y MODALES
+    function ocultarTodosModales() {
+        if (bsModalLogin) bsModalLogin.hide();
+        if (bsModalRegistro) bsModalRegistro.hide();
+        if (bsModalResetPass) bsModalResetPass.hide();
+    }
+
+    function mostrarModalLogin() {
+        appContainer.classList.add('contenido-bloqueado');
+        ocultarTodosModales();
+        if (bsModalLogin) bsModalLogin.show();
+    }
+
+    function abrirModalRegistro() {
+        ocultarTodosModales();
+        if (bsModalRegistro) bsModalRegistro.show();
+    }
+
+    function abrirModalLogin() {
+        ocultarTodosModales();
+        if (bsModalLogin) bsModalLogin.show();
+    }
+
+    function abrirModalResetPass() {
+        ocultarTodosModales();
+        if (bsModalResetPass) bsModalResetPass.show();
+    }
+
+    function mostrarInterfazPrincipal() {
+        ocultarTodosModales();
+
+        appContainer.classList.remove('contenido-bloqueado');
+
+        // Cargar datos en la barra superior y campos
+        document.getElementById('labelUsuario').innerText = `${usuarioLogueado.jerarquia} ${usuarioLogueado.apellido}`;
+        document.getElementById('btnCerrarSesion').classList.remove('d-none');
+
+        document.getElementById('selectJerarquia').value = usuarioLogueado.jerarquia;
+        document.getElementById('inputApellido').value = usuarioLogueado.apellido;
+        document.getElementById('inputNombre').value = usuarioLogueado.nombre;
+
+        solicitarFechasActuales();
+    }
+
+    // AUTH: LOGIN, REGISTRO Y RESTABLECER CLAVE
+    function ejecutarLogin(event) {
+        event.preventDefault();
+        const dni = document.getElementById('loginDni').value.trim();
+        const pass = document.getElementById('loginPass').value.trim();
+
+        if (!dni || !pass) {
+            Swal.fire('Atención', 'Por favor ingresa tu DNI y contraseña.', 'warning');
+            return;
+        }
+
+        socket.emit('solicitarLogin', { dni, pass });
+    }
+
+    function ejecutarRegistro(event) {
+        event.preventDefault();
+        const dni = document.getElementById('regDni').value.trim();
+        const pass = document.getElementById('regPass').value.trim();
+        const jerarquia = document.getElementById('regJerarquia').value;
+        const apellido = document.getElementById('regApellido').value.trim().toUpperCase();
+        const nombre = document.getElementById('regNombre').value.trim().toUpperCase();
+
+        if (!dni || !pass || !jerarquia || !apellido || !nombre) {
+            Swal.fire('Atención', 'Todos los campos son obligatorios.', 'warning');
+            return;
+        }
+
+        socket.emit('solicitarRegistro', { dni, pass, jerarquia, apellido, nombre });
+    }
+
+    function ejecutarResetPass(event) {
+        event.preventDefault();
+        const dni = document.getElementById('resetDni').value.trim();
+        const jerarquia = document.getElementById('resetJerarquia').value;
+        const nuevaPass = document.getElementById('resetNuevapass').value.trim(); // Se asegura de tomar el valor correcto
+
+        if (!dni || !jerarquia || !nuevaPass) {
+            Swal.fire('Atención', 'Todos los campos son requeridos.', 'warning');
+            return;
+        }
+
+        socket.emit('solicitarReseteoPass', { dni, jerarquia, nuevaPass });
+    }
+
+    // RESETEO PASS
+    socket.on('resultadoReseteoPass', (res) => {
+    if (res.exito) {
+        // Cerrar el modal de reseteo si está abierto
+        const modalElement = document.getElementById('modalResetPass');
+        const bsModal = bootstrap.Modal.getInstance(modalElement);
+        if (bsModal) bsModal.hide();
+
+        // Limpiar formulario y sesión almacenada
+        document.getElementById('formResetPass').reset();
+        localStorage.removeItem('usuarioGuardia');
+
+        // Mostrar alerta de éxito
+        Swal.fire({
+            title: '¡Contraseña Actualizada!',
+            text: res.mensaje,
+            icon: 'success',
+            confirmButtonText: 'Iniciar Sesión'
+        }).then(() => {
+            // Abrir el modal de Login automáticamente
+            abrirModalLogin(); 
+        });
+    } else {
+        // Si ocurrió algún error (ej. DNI no encontrado)
+        Swal.fire({
+            title: 'Error',
+            text: res.mensaje,
+            icon: 'error',
+            confirmButtonText: 'Entendido'
+        });
+    }
+});
+
+    // WEBSOCKETS: RESPUESTAS DE AUTH
+    socket.on('resultadoLogin', (res) => {
+        if (res.exito) {
+            usuarioLogueado = res.usuario;
+            localStorage.setItem('usuarioGuardia', JSON.stringify(res.usuario));
+
+            Swal.fire('¡Bienvenido!', res.mensaje, 'success').then(() => {
+                mostrarInterfazPrincipal();
+            });
+        } else {
+            Swal.fire('Error de Acceso', res.mensaje, 'error');
+        }
+    });
+
+    socket.on('resultadoRegistro', (res) => {
+        if (res.exito) {
+            Swal.fire('¡Registro Exitoso!', res.mensaje, 'success').then(() => {
+                abrirModalLogin();
+            });
+        } else {
+            Swal.fire('Error de Registro', res.mensaje, 'error');
+        }
+    });
+
+    // GUARDIAS: CARGA Y RENDERIZADO
+    function solicitarFechasActuales() {
+        if (!usuarioLogueado) return;
+
+        socket.emit('obtenerFechas', {
+            mes: selectMes.value,
+            año: selectAño.value,
+            dni: usuarioLogueado.dni
+        });
+    }
+
     socket.on('cargarFechas', (data) => {
-        procesarDatos(data);
+        procesarDatosGuardias(data);
     });
 
     socket.on('actualizarFechas', (data) => {
-        procesarDatos(data);
+        if (data.infoMes && data.infoMes.mesNumero == selectMes.value && data.infoMes.año == selectAño.value) {
+            procesarDatosGuardias(data);
+        }
     });
 
-    function procesarDatos(data) {
+    function procesarDatosGuardias(data) {
         if (data.infoMes) {
-            tituloMes.innerText = `Guardias ${data.infoMes.mesNombre} ${data.infoMes.año}`;
-            selectMes.value = data.infoMes.mesNumero;
-            selectAño.value = data.infoMes.año;
+            document.getElementById('tituloMes').innerText = `Guardias ${data.infoMes.mesNombre} ${data.infoMes.año}`;
         }
-        renderizarFechas(data.oficiales, contenedorOficiales, 'oficial');
-        renderizarFechas(data.disponibles, contenedorDisponibles, 'disponible');
+        if (data.cancelacionesUsadas !== undefined) {
+            cancelacionesUsadas = data.cancelacionesUsadas;
+            const restantes = Math.max(0, 3 - cancelacionesUsadas);
+            document.getElementById('contadorDesreservasOficial').innerText = `Cancelaciones disponibles: ${restantes}/3`;
+            document.getElementById('contadorDesreservasDisponible').innerText = `Cancelaciones disponibles: ${restantes}/3`;
+        }
+
+        renderizarTabla(data.oficiales, 'contenedorOficiales', 'oficial');
+        renderizarTabla(data.disponibles, 'contenedorDisponibles', 'disponible');
     }
 
-    function cambiarMes() {
-        const m = selectMes.value;
-        const a = selectAño.value;
-        socket.emit('solicitarCambioMes', { mes: m, año: a });
+    function renderizarTabla(lista, idContenedor, tipoGuardia) {
+        const contenedor = document.getElementById(idContenedor);
+        contenedor.innerHTML = '';
+
+        if (!lista || lista.length === 0) {
+            contenedor.innerHTML = '<div class="col-12 text-center text-muted">No hay fechas disponibles.</div>';
+            return;
+        }
+
+        lista.forEach(item => {
+            const esMio = item.agente && String(item.agente.dni) === String(usuarioLogueado.dni);
+            const estaReservado = item.estado === 'reservado';
+
+            let claseCard = 'bg-white border-secondary';
+            let textoEstado = '<span class="badge bg-success">DISPONIBLE</span>';
+            let detalleAgente = '<span class="text-muted small">Libre para reservar</span>';
+            let botonAccion = `<button onclick="reservarGuardia(${item.id}, '${tipoGuardia}')" class="btn btn-sm btn-outline-primary fw-bold w-100">Reservar</button>`;
+
+            if (estaReservado) {
+                if (esMio) {
+                    claseCard = 'reservado-propio';
+                    textoEstado = '<span class="badge bg-primary">TU RESERVA</span>';
+                    detalleAgente = `<strong class="text-success small">${item.agente.jerarquia} ${item.agente.apellido}</strong>`;
+                    botonAccion = `<button onclick="desreservarGuardia(${item.id}, '${tipoGuardia}')" class="btn btn-sm btn-danger fw-bold w-100">Liberar Fecha</button>`;
+                } else {
+                    claseCard = 'reservado-tercero';
+                    textoEstado = '<span class="badge bg-secondary">OCUPADO</span>';
+                    detalleAgente = `<span class="text-muted small fw-bold">Ocupado</span>`;
+                    botonAccion = `<button class="btn btn-sm btn-secondary w-100" disabled>No Disponible</button>`;
+                }
+            }
+
+            const col = document.createElement('div');
+            col.className = 'col-6 col-sm-4 col-md-3';
+            col.innerHTML = `
+                <div class="card card-fecha shadow-sm h-100 p-2 text-center ${claseCard}">
+                    <div class="fw-bold small text-dark mb-1">${item.fecha}</div>
+                    <div class="mb-1">${textoEstado}</div>
+                    <div class="mb-2 text-truncate" style="min-height: 20px;">${detalleAgente}</div>
+                    ${botonAccion}
+                </div>
+            `;
+            contenedor.appendChild(col);
+        });
+    }
+
+    // RESERVAS Y CANCELACIONES
+    function reservarGuardia(idFecha, tipoGuardia) {
+        if (!usuarioLogueado) return;
+
+        socket.emit('solicitarReserva', {
+            idFecha,
+            tipoGuardia,
+            jerarquia: usuarioLogueado.jerarquia,
+            apellido: usuarioLogueado.apellido,
+            nombre: usuarioLogueado.nombre,
+            dni: usuarioLogueado.dni,
+            mes: selectMes.value,
+            año: selectAño.value
+        });
+    }
+
+    function desreservarGuardia(idFecha, tipoGuardia) {
+        if (!usuarioLogueado) return;
+
+        Swal.fire({
+            title: '¿Liberar esta fecha?',
+            text: 'Recuerda que tienes un límite de 3 cancelaciones por mes.',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Sí, liberar',
+            cancelButtonText: 'Cancelar'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                socket.emit('solicitarDesreserva', {
+                    idFecha,
+                    tipoGuardia,
+                    dni: usuarioLogueado.dni,
+                    mes: selectMes.value,
+                    año: selectAño.value
+                });
+            }
+        });
     }
 
     socket.on('resultadoReserva', (res) => {
         if (res.exito) {
-            Swal.fire({
-                icon: 'success',
-                title: '¡Reserva Confirmada!',
-                text: res.mensaje,
-                confirmButtonColor: '#0d6efd'
-            });
+            Swal.fire('¡Reserva Confirmada!', res.mensaje, 'success');
+            solicitarFechasActuales();
         } else {
-            Swal.fire({
-                icon: 'error',
-                title: 'Atención',
-                text: res.mensaje,
-                confirmButtonColor: '#dc3545'
-            });
+            Swal.fire('No se pudo reservar', res.mensaje, 'warning');
         }
     });
 
-    function renderizarFechas(fechas, contenedor, tipoGuardia) {
-    if (!contenedor) return;
-    contenedor.innerHTML = '';
+    socket.on('resultadoDesreserva', (res) => {
+        if (res.exito) {
+            Swal.fire('Fecha Liberada', res.mensaje, 'success');
+            solicitarFechasActuales();
+        } else {
+            Swal.fire('Atención', res.mensaje, 'warning');
+        }
+    });
 
-    if (!fechas || fechas.length === 0) {
-        contenedor.innerHTML = '<p class="text-center text-muted">No hay fechas disponibles.</p>';
-        return;
+    function cerrarSesion() {
+        localStorage.removeItem('usuarioGuardia');
+        usuarioLogueado = null;
+        window.location.reload();
     }
 
-    fechas.forEach(f => {
-        const col = document.createElement('div');
-        col.className = 'col-6 col-md-4';
+    document.getElementById('formResetPass').addEventListener('submit', (e) => {
+    e.preventDefault(); // Evita que se recargue la página
 
-        const esReservado = f.estado === 'reservado';
-        const etiquetaAgente = esReservado ? '🔒 Reservado' : '🟢 Disponible';
-        
-        col.innerHTML = `
-            <div class="card card-fecha h-100 ${esReservado ? 'reservado border-0' : 'border-primary'} text-center p-2">
-                <span class="fw-bold fs-6 ${esReservado ? 'text-muted' : 'text-primary'}">${f.fecha}</span>
-                <small class="d-block text-truncate mt-1 ${esReservado ? 'text-danger fw-bold' : 'text-success'}">
-                    ${etiquetaAgente}
-                </small>
-                <button class="btn btn-sm ${esReservado ? 'btn-secondary disabled' : 'btn-primary'} mt-2 w-100" 
-                        onclick="reservarFecha(${f.id}, '${tipoGuardia}')" ${esReservado ? 'disabled' : ''}>
-                    ${esReservado ? 'Ocupado' : 'Reservar'}
-                </button>
-            </div>
-        `;
-        contenedor.appendChild(col);
+    const dni = document.getElementById('resetDni').value;
+    const nuevaPass = document.getElementById('resetNuevaPass').value;
+
+    // Emitir el evento al backend con los datos limpios
+    socket.emit('solicitarReseteoPass', { 
+        dni: dni.trim(), 
+        nuevaPass: nuevaPass.trim() 
     });
-}
-
-    function reservarFecha(idFecha, tipoGuardia) {
-    const jerarquia = document.getElementById('selectJerarquia').value;
-    const apellido = document.getElementById('inputApellido').value.trim();
-    const nombre = document.getElementById('inputNombre').value.trim();
-    const mes = document.getElementById('selectMes').value;
-    const año = document.getElementById('selectAño').value;
-
-    if (!jerarquia || !apellido || !nombre) {
-        Swal.fire({
-            icon: 'warning',
-            title: 'Campos incompletos',
-            text: 'Por favor complete Jerarquía, Apellido y Nombre antes de seleccionar una fecha.'
-        });
-        return;
-    }
-
-    // Enviamos el mes y año junto con la reserva para evitar cruces
-    socket.emit('solicitarReserva', { 
-        idFecha, 
-        tipoGuardia, 
-        jerarquia, 
-        apellido, 
-        nombre,
-        mes,
-        año
-    });
-}
+});
 </script>
-
 </body>
 </html>

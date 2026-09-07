@@ -1,41 +1,80 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import basicAuth from 'express-basic-auth';
-import ExcelJS from 'exceljs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import pkg from 'pg';
+
+console.log('>>> DATABASE_URL actual:', process.env.DATABASE_URL);
+
+const { Pool } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-
-
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer,{
-    pingTimeout: 300000,  // 5 minutos de inactividad sin respuesta (300,000 ms)
-    pingInterval: 25000,  // Revisa el estado de la conexión cada 25 segundos
-    connectTimeout: 30000 // Tiempo máximo para establecer la conexión inicial
+const io = new Server(httpServer, {
+    pingTimeout: 300000,
+    pingInterval: 25000,
+    connectTimeout: 30000
 });
 
-// Configuración de clave para el Administrador / Encargado
+// -------------------------------------------------------------
+// CONEXIÓN A POSTGRESQL
+// -------------------------------------------------------------
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
+
+// Inicializar tabla de usuarios
+async function inicializarBaseDatos() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS usuarios (
+                dni VARCHAR(20) PRIMARY KEY,
+                pass VARCHAR(100) NOT NULL,
+                jerarquia VARCHAR(50),
+                apellido VARCHAR(100) NOT NULL,
+                nombre VARCHAR(100) NOT NULL,
+                creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        console.log('>>> Base de datos PostgreSQL conectada y tabla "usuarios" verificada.');
+    } catch (error) {
+        console.error('>>> Error al inicializar la base de datos PostgreSQL:', error);
+    }
+}
+inicializarBaseDatos();
+
+// -------------------------------------------------------------
+// MIDDLEWARES Y RUTAS HTTP
+// -------------------------------------------------------------
+app.use(express.json());
+
+// Middleware de seguridad para la sección /admin
 const seguridadAdmin = basicAuth({
-    users: { 'esub': '*guardia/9595' }, // Usuario: admin | Contraseña: tu_clave_aqui
-    challenge: true, // Hace que el navegador muestre la ventana flotante de inicio de sesión
+    users: { 'esub': '*guardia/9595' },
+    challenge: true,
     unauthorizedResponse: 'Acceso no autorizado al Panel de Control de la PNA.'
 });
 
-// Aplicar la protección ÚNICAMENTE a las rutas que empiezan con /admin
-app.use('/admin', seguridadAdmin);
+// Ruta del panel de administración (Protegida)
+app.get('/admin', seguridadAdmin, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
 
-app.use(express.json());
+// Servir archivos estáticos de la carpeta public
 app.use(express.static(path.join(__dirname, 'public')));
 
 // -------------------------------------------------------------
-// 1. BASE DE DATOS EN MEMORIA POR MES Y AÑO (Clave: "YYYY-MM")
+// ESTRUCTURAS DE DATOS EN MEMORIA (GUARDIAS Y DESRESERVAS)
 // -------------------------------------------------------------
 const baseDatosGuardias = {};
+const contadoresDesreserva = {};
 
 function obtenerOCrearMes(mes, año) {
     const clave = `${año}-${String(mes).padStart(2, '0')}`;
@@ -43,11 +82,8 @@ function obtenerOCrearMes(mes, año) {
     if (!baseDatosGuardias[clave]) {
         const oficiales = [];
         const disponibles = [];
-
-        // Cantidad de días reales del mes
         const totalDias = new Date(año, mes, 0).getDate();
 
-        // Formato de nombre del mes (Ej: Octubre)
         const fechaObjMes = new Date(año, mes - 1, 1);
         let nombreMes = fechaObjMes.toLocaleString('es-AR', { month: 'long' });
         nombreMes = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
@@ -56,203 +92,246 @@ function obtenerOCrearMes(mes, año) {
 
         for (let dia = 1; dia <= totalDias; dia++) {
             const strDia = String(dia).padStart(2, '0');
-            const fechaObj = new Date(año, mes - 1, dia);
+            const fechaObj = new Date(año, mes - 1, dia, 12, 0, 0);
 
-            // Obtener el día de la semana (Jue, Vie, Sáb...)
-            let diaNombre = fechaObj.toLocaleString('es-AR', { weekday: 'short' });
+            let diaNombre = fechaObj.toLocaleString('es-AR', { weekday: 'short', timeZone: 'America/Argentina/Buenos_Aires' });
             diaNombre = diaNombre.replace('.', '');
             diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
 
             const fechaTexto = `${diaNombre} ${strDia}/${strMes}`;
 
-            oficiales.push({
-                id: dia,
-                fecha: fechaTexto,
-                estado: 'disponible',
-                agente: null,
-                reservadoEn: null
-            });
-
-            disponibles.push({
-                id: dia,
-                fecha: fechaTexto,
-                estado: 'disponible',
-                agente: null,
-                reservadoEn: null
-            });
+            oficiales.push({ id: dia, fecha: fechaTexto, estado: 'disponible', agente: null, reservadoEn: null });
+            disponibles.push({ id: dia, fecha: fechaTexto, estado: 'disponible', agente: null, reservadoEn: null });
         }
 
         baseDatosGuardias[clave] = {
-            infoMes: { mesNombre: nombreMes, año: año, totalDias: totalDias, mesNumero: mes },
-            oficiales: oficiales,
-            disponibles: disponibles
+            infoMes: { mesNombre: nombreMes, año: Number(año), totalDias, mesNumero: Number(mes) },
+            oficiales,
+            disponibles
         };
+    }
+
+    if (!contadoresDesreserva[clave]) {
+        contadoresDesreserva[clave] = {};
     }
 
     return baseDatosGuardias[clave];
 }
 
 // -------------------------------------------------------------
-// 2. WEBSOCKETS EN TIEMPO REAL
+// WEBSOCKETS EN TIEMPO REAL
 // -------------------------------------------------------------
 io.on('connection', (socket) => {
-    // Al conectar, enviamos por defecto Octubre 2026 (o el mes actual)
-    const datosIniciales = obtenerOCrearMes(10, 2026);
-    socket.emit('cargarFechas', datosIniciales);
 
-    // Consulta de un mes específico
-    socket.on('obtenerFechas', (data) => {
-        const mes = data && data.mes ? Number(data.mes) : 10;
-        const año = data && data.año ? Number(data.año) : 2026;
-        const datos = obtenerOCrearMes(mes, año);
-        socket.emit('cargarFechas', datos);
+    // REGISTRO DE NUEVO USUARIO
+    socket.on('solicitarRegistro', async (data) => {
+        const { dni, pass, jerarquia, apellido, nombre } = data;
+        const dniClean = String(dni).trim();
+
+        try {
+            const existeRes = await pool.query('SELECT dni FROM usuarios WHERE TRIM(dni) = $1', [dniClean]);
+            if (existeRes.rows.length > 0) {
+                socket.emit('resultadoRegistro', {
+                    exito: false,
+                    mensaje: 'El DNI ingresado ya se encuentra registrado en el sistema.'
+                });
+                return;
+            }
+
+            const queryInsert = `
+                INSERT INTO usuarios (dni, pass, jerarquia, apellido, nombre)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING dni, jerarquia, apellido, nombre;
+            `;
+            const values = [
+                dniClean,
+                String(pass).trim(),
+                jerarquia ? jerarquia.trim() : '',
+                apellido ? apellido.trim().toUpperCase() : '',
+                nombre ? nombre.trim().toUpperCase() : ''
+            ];
+
+            const result = await pool.query(queryInsert, values);
+            socket.emit('resultadoRegistro', {
+                exito: true,
+                mensaje: '¡Registro exitoso! Ya puedes iniciar sesión con tu DNI.',
+                usuario: result.rows[0]
+            });
+        } catch (error) {
+            console.error('Error en solicitarRegistro:', error);
+            socket.emit('resultadoRegistro', {
+                exito: false,
+                mensaje: 'Error de servidor al procesar el registro.'
+            });
+        }
     });
 
-    // Reserva de guardia robusta por Mes y Año
-    socket.on('solicitarReserva', (data) => {
-        const { idFecha, tipoGuardia, jerarquia, apellido, nombre, mes, año } = data;
-        
-        const m = Number(mes) || 10;
-        const a = Number(año) || 2026;
+    // INICIO DE SESIÓN
+    socket.on('solicitarLogin', async (data) => {
+        const { dni, pass } = data;
+        const dniClean = String(dni).trim();
+        const passClean = String(pass).trim();
 
-        const datosMes = obtenerOCrearMes(m, a);
+        try {
+            const userRes = await pool.query('SELECT * FROM usuarios WHERE TRIM(dni) = $1', [dniClean]);
+
+            if (userRes.rows.length === 0) {
+                socket.emit('resultadoLogin', {
+                    exito: false,
+                    mensaje: 'El usuario no está registrado. Debe registrarse primero.'
+                });
+                return;
+            }
+
+            const usuario = userRes.rows[0];
+
+            if (usuario.pass.trim() !== passClean) {
+                socket.emit('resultadoLogin', {
+                    exito: false,
+                    mensaje: 'Contraseña incorrecta. Intente nuevamente.'
+                });
+                return;
+            }
+
+            socket.emit('resultadoLogin', {
+                exito: true,
+                mensaje: `¡Bienvenido/a ${usuario.jerarquia} ${usuario.apellido}!`,
+                usuario: {
+                    dni: usuario.dni,
+                    jerarquia: usuario.jerarquia,
+                    apellido: usuario.apellido,
+                    nombre: usuario.nombre
+                }
+            });
+        } catch (error) {
+            console.error('Error en solicitarLogin:', error);
+            socket.emit('resultadoLogin', {
+                exito: false,
+                mensaje: 'Error en el servidor al intentar iniciar sesión.'
+            });
+        }
+    });
+
+    // RESTABLECER / CAMBIAR CONTRASEÑA
+    socket.on('solicitarReseteoPass', async (data) => {
+        const { dni, nuevaPass } = data;
+        const dniClean = String(dni).trim();
+        const nuevaPassClean = String(nuevaPass).trim();
+
+        if (!dniClean || !nuevaPassClean) {
+            socket.emit('resultadoReseteoPass', {
+                exito: false,
+                mensaje: 'Por favor, completa todos los campos.'
+            });
+            return;
+        }
+
+        try {
+            // Verificar únicamente que el DNI exista
+            const userRes = await pool.query('SELECT dni FROM usuarios WHERE TRIM(dni) = $1', [dniClean]);
+
+            if (userRes.rows.length === 0) {
+                socket.emit('resultadoReseteoPass', {
+                    exito: false,
+                    mensaje: 'El DNI ingresado no se encuentra registrado.'
+                });
+                return;
+            }
+
+            // Actualizar la contraseña
+            await pool.query('UPDATE usuarios SET pass = $1 WHERE TRIM(dni) = $2', [nuevaPassClean, dniClean]);
+
+            socket.emit('resultadoReseteoPass', {
+                exito: true,
+                mensaje: 'La contraseña ha sido actualizada correctamente. Inicia sesión con tu nueva clave.'
+            });
+        } catch (error) {
+            console.error('Error en solicitarReseteoPass:', error);
+            socket.emit('resultadoReseteoPass', {
+                exito: false,
+                mensaje: 'Error interno en el servidor al intentar actualizar la contraseña.'
+            });
+        }
+    });
+
+    // OBTENER FECHAS
+    socket.on('obtenerFechas', (data) => {
+        const { mes, año, dni } = data;
+        const datosMes = obtenerOCrearMes(mes, año);
+        const clave = `${año}-${String(mes).padStart(2, '0')}`;
+        const cancelaciones = contadoresDesreserva[clave][dni] || 0;
+
+        socket.emit('cargarFechas', {
+            ...datosMes,
+            cancelacionesUsadas: cancelaciones
+        });
+    });
+
+    // SOLICITAR RESERVA
+    socket.on('solicitarReserva', (data) => {
+        const { idFecha, tipoGuardia, jerarquia, apellido, nombre, dni, mes, año } = data;
+        const datosMes = obtenerOCrearMes(mes, año);
         const lista = tipoGuardia === 'oficial' ? datosMes.oficiales : datosMes.disponibles;
 
-        const fechaItem = lista.find(f => f.id === Number(idFecha));
-
-        if (!fechaItem) {
-            socket.emit('resultadoReserva', { exito: false, mensaje: 'Fecha no encontrada.' });
-            return;
-        }
-
-        if (fechaItem.estado !== 'disponible') {
-            socket.emit('resultadoReserva', { 
-                exito: false, 
-                mensaje: '¡Esta fecha ya está reservada por otro personal!' 
+        const yaTieneReserva = lista.some(item => item.agente && String(item.agente.dni) === String(dni));
+        if (yaTieneReserva) {
+            socket.emit('resultadoReserva', {
+                exito: false,
+                mensaje: `Ya posees una reserva de Guardia ${tipoGuardia === 'oficial' ? 'Oficial' : 'Disponible'} asignada en este mes.`
             });
             return;
         }
 
-        // Asignar reserva exitosa
-        fechaItem.estado = 'reservado';
-        fechaItem.agente = { 
-            jerarquia: jerarquia.trim(), 
-            apellido: apellido.trim().toUpperCase(), 
-            nombre: nombre.trim().toUpperCase() 
-        };
-        fechaItem.reservadoEn = new Date().toLocaleString('es-AR');
+        const fechaItem = lista.find(item => item.id === idFecha);
+        if (fechaItem && fechaItem.estado === 'disponible') {
+            fechaItem.estado = 'reservado';
+            fechaItem.agente = { dni, jerarquia, apellido, nombre };
+            fechaItem.reservadoEn = new Date();
 
-        const tipoTexto = tipoGuardia === 'oficial' ? 'Guardia Oficial' : 'Guardia Disponible';
-
-        socket.emit('resultadoReserva', { 
-            exito: true, 
-            mensaje: `¡${tipoTexto} del ${fechaItem.fecha} reservada con éxito!` 
-        });
-
-        // Actualizar a todos los conectados
-        io.emit('actualizarFechas', datosMes);
+            socket.emit('resultadoReserva', { exito: true, mensaje: 'Reserva realizada con éxito.' });
+            io.emit('actualizarFechas', datosMes);
+        } else {
+            socket.emit('resultadoReserva', { exito: false, mensaje: 'La fecha seleccionada ya no se encuentra disponible.' });
+        }
     });
-});
 
-// -------------------------------------------------------------
-// 3. EXPORTAR A EXCEL Y REINICIAR
-// -------------------------------------------------------------
-app.get('/admin/exportar-excel', async (req, res) => {
-    try {
-        const mes = Number(req.query.mes) || 10;
-        const año = Number(req.query.año) || 2026;
-        const datos = obtenerOCrearMes(mes, año);
+    // SOLICITAR DESRESERVA (CANCELACIÓN)
+    socket.on('solicitarDesreserva', (data) => {
+        const { idFecha, tipoGuardia, dni, mes, año } = data;
+        const datosMes = obtenerOCrearMes(mes, año);
+        const clave = `${año}-${String(mes).padStart(2, '0')}`;
 
-        const workbook = new ExcelJS.Workbook();
+        if (!contadoresDesreserva[clave][dni]) {
+            contadoresDesreserva[clave][dni] = 0;
+        }
 
-        // Estructura de columnas simplificada
-        const columnasLimpia = [
-            { header: 'Fecha', key: 'fecha', width: 15 },
-            { header: 'Estado', key: 'estado', width: 14 },
-            { header: 'Jerarquía', key: 'jerarquia', width: 12 },
-            { header: 'Apellido', key: 'apellido', width: 22 },
-            { header: 'Nombre', key: 'nombre', width: 22 }
-        ];
-
-        // Hoja 1: Guardias Oficiales
-        const wsOficiales = workbook.addWorksheet('Guardias Oficiales');
-        wsOficiales.columns = columnasLimpia;
-
-        datos.oficiales.forEach(f => {
-            wsOficiales.addRow({
-                fecha: f.fecha,
-                estado: f.estado.toUpperCase(),
-                jerarquia: f.agente ? f.agente.jerarquia : '-',
-                apellido: f.agente ? f.agente.apellido : 'SIN ASIGNAR',
-                nombre: f.agente ? f.agente.nombre : '-'
+        if (contadoresDesreserva[clave][dni] >= 3) {
+            socket.emit('resultadoDesreserva', {
+                exito: false,
+                mensaje: 'Has alcanzado el límite máximo de 3 cancelaciones permitidas para este mes.'
             });
-        });
-        wsOficiales.getRow(1).font = { bold: true };
+            return;
+        }
 
-        // Hoja 2: Guardias Disponibles
-        const wsDisponibles = workbook.addWorksheet('Guardias Disponibles');
-        wsDisponibles.columns = columnasLimpia;
+        const lista = tipoGuardia === 'oficial' ? datosMes.oficiales : datosMes.disponibles;
+        const fechaItem = lista.find(item => item.id === idFecha);
 
-        datos.disponibles.forEach(f => {
-            wsDisponibles.addRow({
-                fecha: f.fecha,
-                estado: f.estado.toUpperCase(),
-                jerarquia: f.agente ? f.agente.jerarquia : '-',
-                apellido: f.agente ? f.agente.apellido : 'SIN ASIGNAR',
-                nombre: f.agente ? f.agente.nombre : '-'
-            });
-        });
-        wsDisponibles.getRow(1).font = { bold: true };
+        if (fechaItem && fechaItem.agente && String(fechaItem.agente.dni) === String(dni)) {
+            fechaItem.estado = 'disponible';
+            fechaItem.agente = null;
+            fechaItem.reservadoEn = null;
 
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=Guardias_${datos.infoMes.mesNombre}_${año}.xlsx`);
+            contadoresDesreserva[clave][dni] += 1;
 
-        await workbook.xlsx.write(res);
-        res.end();
-    } catch (error) {
-        res.status(500).send('Error al generar Excel.');
-    }
-});
-// -------------------------------------------------------------
-// ELIMINAR REGISTROS DE UN MES ESPECÍFICO (ADMIN)
-// -------------------------------------------------------------
-app.get('/admin/eliminar-mes', (req, res) => {
-    const mes = Number(req.query.mes) || 10;
-    const año = Number(req.query.año) || 2026;
-    const clave = `${año}-${String(mes).padStart(2, '0')}`;
-
-    if (baseDatosGuardias[clave]) {
-        delete baseDatosGuardias[clave]; // Borra el mes completamente de la memoria
-    }
-
-    // Volver a inicializar las fechas limpias para el mes consultado
-    const datosNuevos = obtenerOCrearMes(mes, año);
-
-    // Notificar a todos los usuarios conectados para actualizar la vista
-    io.emit('actualizarFechas', datosNuevos);
-    
-    res.json({ exito: true, mensaje: `Se eliminaron todos los registros del mes ${mes}/${año}.` });
-});
-// -------------------------------------------------------------
-// REINICIAR MES
-// -------------------------------------------------------------
-app.get('/admin/reiniciar-mes', (req, res) => {
-    const mes = Number(req.query.mes) || 10;
-    const año = Number(req.query.año) || 2026;
-    const clave = `${año}-${String(mes).padStart(2, '0')}`;
-
-    delete baseDatosGuardias[clave]; // Borra las reservas de ese mes específico
-    const datosNuevos = obtenerOCrearMes(mes, año);
-
-    io.emit('actualizarFechas', datosNuevos);
-    res.send('Mes reiniciado.');
-});
-
-app.get('/admin', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+            socket.emit('resultadoDesreserva', { exito: true, mensaje: 'La reserva ha sido cancelada satisfactoriamente.' });
+            io.emit('actualizarFechas', datosMes);
+        } else {
+            socket.emit('resultadoDesreserva', { exito: false, mensaje: 'No fue posible cancelar la reserva seleccionada.' });
+        }
+    });
 });
 
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
-    console.log(`>>> Servidor corriendo en http://localhost:${PORT}`);
+    console.log(`>>> Servidor corriendo en el puerto ${PORT}`);
 });
