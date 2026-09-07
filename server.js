@@ -106,7 +106,7 @@ app.get('/admin/exportar-excel', seguridadAdmin, async (req, res) => {
         `;
         const result = await pool.query(query, [claveMes]);
 
-        const workbook = new ExcelJS.Workbook();
+        const workbook = new exceljs.Workbook();
         const worksheet = workbook.addWorksheet(`Guardias ${claveMes}`);
 
         worksheet.columns = [
