@@ -34,6 +34,7 @@ const pool = new Pool({
 // Inicializar tabla de usuarios
 async function inicializarBaseDatos() {
     try {
+        // 1. Crear tabla de usuarios si no existe
         await pool.query(`
             CREATE TABLE IF NOT EXISTS usuarios (
                 dni VARCHAR(20) PRIMARY KEY,
@@ -44,7 +45,21 @@ async function inicializarBaseDatos() {
                 creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        console.log('>>> Base de datos PostgreSQL conectada y tabla "usuarios" verificada.');
+
+        // 2. Crear tabla de reservas si no existe
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS reservas (
+                id SERIAL PRIMARY KEY,
+                clave_mes VARCHAR(10) NOT NULL,
+                id_fecha INT NOT NULL,
+                tipo_guardia VARCHAR(20) NOT NULL,
+                dni_agente VARCHAR(20) REFERENCES usuarios(dni) ON DELETE CASCADE,
+                reservado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (clave_mes, id_fecha, tipo_guardia)
+            );
+        `);
+
+        console.log('>>> Base de datos PostgreSQL conectada y tablas ("usuarios" y "reservas") verificadas.');
     } catch (error) {
         console.error('>>> Error al inicializar la base de datos PostgreSQL:', error);
     }
