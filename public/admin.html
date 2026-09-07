@@ -225,6 +225,51 @@
         });
     }
 
+    // Función para seleccionar automáticamente el mes y año actual
+    function seleccionarMesYAnoActual() {
+        const fechaActual = new Date();
+        // getMonth() devuelve de 0 (Enero) a 11 (Diciembre), por lo que sumamos 1
+        const mesActual = fechaActual.getMonth() + 1; 
+        const añoActual = fechaActual.getFullYear();
+
+        const selectMes = document.getElementById('selectMesAdmin');
+        const selectAño = document.getElementById('selectAñoAdmin');
+
+        if (selectMes) {
+            selectMes.value = mesActual;
+        }
+
+        if (selectAño) {
+            selectAño.value = añoActual;
+        }
+    }
+
+    // Al cargar la pantalla del Administrador
+    document.addEventListener('DOMContentLoaded', () => {
+        // 1. Establecer el mes y año en curso en los selects
+        seleccionarMesYAnoActual();
+
+        // 2. Cargar automáticamente las guardias del mes actual al entrar al Admin
+        cargarGuardiasAdmin();
+    });
+
+    // Función para solicitar las guardias seleccionadas al servidor
+    function cargarGuardiasAdmin() {
+        const mes = document.getElementById('selectMesAdmin').value;
+        const año = document.getElementById('selectAñoAdmin').value;
+
+        socket.emit('obtenerFechas', { 
+            mes: Number(mes), 
+            año: Number(año),
+            dni: 'ADMIN' // Se puede pasar un identificador para el panel de administración
+        });
+    }
+
+    // Escuchar el clic del botón "Ver Fechas"
+    document.getElementById('btnCargarAdmin')?.addEventListener('click', () => {
+        cargarGuardiasAdmin();
+    });
+
     // Listener único de respuesta para el reinicio
     socket.on('resultadoReiniciarMes', (res) => {
         if (res.exito) {
