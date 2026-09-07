@@ -6,6 +6,7 @@ import basicAuth from 'express-basic-auth';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'pg';
+import exceljs from 'exceljs';
 
 console.log('>>> DATABASE_URL actual:', process.env.DATABASE_URL);
 
@@ -65,6 +66,81 @@ const seguridadAdmin = basicAuth({
 // Ruta del panel de administración (Protegida)
 app.get('/admin', seguridadAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+// -------------------------------------------------------------
+// RUTA DE ADMINISTRACIÓN Y EXPORTACIÓN A EXCEL
+// -------------------------------------------------------------
+app.get('/admin', seguridadAdmin, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+app.get('/admin/exportar-excel', seguridadAdmin, async (req, res) => {
+    const mes = req.query.mes || (new Date().getMonth() + 1);
+    const año = req.query.año || new Date().getFullYear();
+    const claveMes = `${año}-${String(mes).padStart(2, '0')}`;
+
+    try {
+        // Consultar reservas desde la base de datos PostgreSQL
+        const query = `
+            SELECT r.id_fecha, r.tipo_guardia, r.reservado_en,
+                   u.dni, u.jerarquia, u.apellido, u.nombre
+            FROM reservas r
+            JOIN usuarios u ON r.dni_agente = u.dni
+            WHERE r.clave_mes = $1
+            ORDER BY r.id_fecha ASC, r.tipo_guardia ASC;
+        `;
+        const result = await pool.query(query, [claveMes]);
+
+        // Crear el archivo de Excel
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet(`Guardias ${claveMes}`);
+
+        worksheet.columns = [
+            { header: 'Día', key: 'dia', width: 10 },
+            { header: 'Tipo de Guardia', key: 'tipo', width: 20 },
+            { header: 'Jerarquía', key: 'jerarquia', width: 18 },
+            { header: 'Apellido', key: 'apellido', width: 20 },
+            { header: 'Nombre', key: 'nombre', width: 20 },
+            { header: 'DNI', key: 'dni', width: 15 },
+            { header: 'Fecha de Reserva', key: 'reservadoEn', width: 22 }
+        ];
+
+        // Formato para el encabezado
+        worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFF' } };
+        worksheet.getRow(1).fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: '0D6EFD' }
+        };
+
+        result.rows.forEach(row => {
+            worksheet.addRow({
+                dia: row.id_fecha,
+                tipo: row.tipo_guardia === 'oficial' ? 'Guardia Oficial' : 'Guardia Disponible',
+                jerarquia: row.jerarquia,
+                apellido: row.apellido,
+                nombre: row.nombre,
+                dni: row.dni,
+                reservadoEn: new Date(row.reservado_en).toLocaleString('es-AR')
+            });
+        });
+
+        res.setHeader(
+            'Content-Type',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+        res.setHeader(
+            'Content-Disposition',
+            `attachment; filename=Guardias_${claveMes}.xlsx`
+        );
+
+        await workbook.xlsx.write(res);
+        res.end();
+
+    } catch (error) {
+        console.error('Error al exportar Excel:', error);
+        res.status(500).send('Error al generar la planilla de Excel.');
+    }
 });
 
 // Servir archivos estáticos de la carpeta public
