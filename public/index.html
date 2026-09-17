@@ -202,7 +202,7 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content shadow-lg">
             <div class="modal-header bg-success text-white">
-                <h5 class="modal-title fw-bold">📝 Registro de Nuevo Agente</h5>
+                <h5 class="modal-title fw-bold">📝 Registro de Nuevo Personal</h5>
             </div>
             <div class="modal-body p-4">
                 <form id="formRegistro" onsubmit="ejecutarRegistro(event)">
@@ -225,11 +225,11 @@
                     </div>
                     <div class="mb-2">
                         <label class="form-label fw-bold small">Apellido</label>
-                        <input type="text" id="regApellido" class="form-control form-control-sm input-mayusculas" placeholder="EJ: PEREZ" required>
+                        <input type="text" id="regApellido" class="form-control form-control-sm input-mayusculas" required>
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-bold small">Nombre</label>
-                        <input type="text" id="regNombre" class="form-control form-control-sm input-mayusculas" placeholder="EJ: JUAN" required>
+                        <input type="text" id="regNombre" class="form-control form-control-sm input-mayusculas" required>
                     </div>
                     <button type="submit" class="btn btn-success w-100 fw-bold py-2">Completar Registro</button>
                 </form>
@@ -264,6 +264,8 @@
 
     // Inicialización del mes y año actual por defecto
     const hoy = new Date();
+    fechaProxima.setMonth(fechaProxima.getMonth() + 1);
+    // getMonth() devuelve valores de 0 a 11, por lo que sumamos 1
     selectMes.value = hoy.getMonth() + 1;
     selectAño.value = hoy.getFullYear();
 
