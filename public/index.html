@@ -266,8 +266,8 @@
     const fechaProxima = new Date();
     fechaProxima.setMonth(fechaProxima.getMonth() + 1);
     // getMonth() devuelve valores de 0 a 11, por lo que sumamos 1
-    selectMes.value = hoy.getMonth() + 1;
-    selectAño.value = hoy.getFullYear();
+    selectMes.value = fechaProxima.getMonth() + 1;
+    selectAño.value = fechaProxima.getFullYear();
 
     document.addEventListener('DOMContentLoaded', () => {
         bsModalLogin = new bootstrap.Modal(document.getElementById('modalLogin'));
