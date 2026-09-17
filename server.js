@@ -378,17 +378,22 @@ io.on('connection', (socket) => {
         const clave = `${año}-${String(mes).padStart(2, '0')}`;
 
         try {
-            // 1. Verificar si el usuario ya posee una reserva de este tipo en el mes activo
+            // 1. Verificar si el usuario ya alcanzó el límite permitido según el tipo de guardia
             const checkUser = `
                 SELECT id FROM reservas 
                 WHERE clave_mes = $1 AND tipo_guardia = $2 AND TRIM(dni_agente) = $3
             `;
             const checkUserRes = await pool.query(checkUser, [clave, tipoGuardia, dniClean]);
 
-            if (checkUserRes.rows.length > 0) {
+            // Definimos el límite máximo: 1 para Guardia Oficial, 2 para Guardia Disponible
+            const limiteMaximo = tipoGuardia === 'disponible' ? 2 : 1;
+
+            if (checkUserRes.rows.length >= limiteMaximo) {
                 socket.emit('resultadoReserva', {
                     exito: false,
-                    mensaje: `Ya posees una reserva de Guardia ${tipoGuardia === 'oficial' ? 'Oficial' : 'Disponible'} asignada en este mes.`
+                    mensaje: tipoGuardia === 'disponible'
+                        ? 'Ya alcanzaste el límite máximo de 2 Guardias Disponibles asignadas para este mes.'
+                        : 'Ya posees una reserva de Guardia Oficial asignada en este mes.'
                 });
                 return;
             }

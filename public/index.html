@@ -120,7 +120,7 @@
 
         <div class="tab-pane fade" id="pills-disponible">
             <div class="alert alert-warning py-2 small mb-3 d-flex justify-content-between align-items-center">
-                <span>Máximo 1 Guardia Disponible por mes.</span>
+                <span>Máximo 2 Guardia Disponible por mes.</span>
                 <span id="contadorDesreservasDisponible" class="fw-bold">Cancelaciones disponibles: 3/3</span>
             </div>
             <div id="contenedorDisponibles" class="row g-2"></div>
@@ -256,6 +256,7 @@
     let bsModalLogin = null;
     let bsModalRegistro = null;
     let bsModalResetPass = null;
+    let listaGuardiasDisponiblesActual = [];
 
     // Elementos del DOM
     const selectMes = document.getElementById('selectMes');
@@ -459,7 +460,8 @@
             document.getElementById('contadorDesreservasOficial').innerText = `Cancelaciones disponibles: ${restantes}/3`;
             document.getElementById('contadorDesreservasDisponible').innerText = `Cancelaciones disponibles: ${restantes}/3`;
         }
-
+        // Guardamos la lista en la variable global para contar luego
+        listaGuardiasDisponiblesActual = data.disponibles || [];
         renderizarTabla(data.oficiales, 'contenedorOficiales', 'oficial');
         renderizarTabla(data.disponibles, 'contenedorDisponibles', 'disponible');
     }
@@ -513,6 +515,23 @@
     // RESERVAS Y CANCELACIONES
     function reservarGuardia(idFecha, tipoGuardia) {
         if (!usuarioLogueado) return;
+
+        // Validación del límite de 2 Guardias Disponibles
+        if (tipoGuardia === 'disponible') {
+            const misDisponiblesReservadas = listaGuardiasDisponiblesActual.filter(f => 
+                f.estado === 'reservado' && f.agente && String(f.agente.dni) === String(usuarioLogueado.dni)
+            ).length;
+
+            if (misDisponiblesReservadas >= 2) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Límite alcanzado',
+                    text: 'Solo podés seleccionar un máximo de 2 Guardias Disponibles por mes.',
+                    confirmButtonColor: '#0d6efd'
+                });
+                return; // Bloquea la reserva si ya tiene 2 asignadas
+            }
+        }
 
         socket.emit('solicitarReserva', {
             idFecha,
