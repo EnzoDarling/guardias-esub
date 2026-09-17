@@ -31,10 +31,10 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// Inicializar tabla de usuarios
+// Inicializar tablas en PostgreSQL
 async function inicializarBaseDatos() {
     try {
-        // 1. Crear tabla de usuarios si no existe
+        // 1. Tabla de usuarios
         await pool.query(`
             CREATE TABLE IF NOT EXISTS usuarios (
                 dni VARCHAR(20) PRIMARY KEY,
@@ -46,7 +46,7 @@ async function inicializarBaseDatos() {
             );
         `);
 
-        // 2. Crear tabla de reservas si no existe
+        // 2. Tabla de reservas
         await pool.query(`
             CREATE TABLE IF NOT EXISTS reservas (
                 id SERIAL PRIMARY KEY,
@@ -82,20 +82,14 @@ const seguridadAdmin = basicAuth({
 app.get('/admin', seguridadAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
-// -------------------------------------------------------------
-// RUTA DE ADMINISTRACIÓN Y EXPORTACIÓN A EXCEL
-// -------------------------------------------------------------
-app.get('/admin', seguridadAdmin, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
 
+// Ruta de exportación a Excel (Protegida)
 app.get('/admin/exportar-excel', seguridadAdmin, async (req, res) => {
     const mes = req.query.mes || (new Date().getMonth() + 1);
     const año = req.query.año || new Date().getFullYear();
     const claveMes = `${año}-${String(mes).padStart(2, '0')}`;
 
     try {
-        // Consulta SQL con TRIM para asegurar la coincidencia de DNI
         const query = `
             SELECT r.id_fecha, r.tipo_guardia, r.reservado_en,
                    u.dni, u.jerarquia, u.apellido, u.nombre
@@ -154,55 +148,80 @@ app.get('/admin/exportar-excel', seguridadAdmin, async (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 // -------------------------------------------------------------
-// ESTRUCTURAS DE DATOS EN MEMORIA (GUARDIAS Y DESRESERVAS)
+// HELPER PARA ESTRUCTURAR EL MES Y CONSULTAR RESERVAS EN BD
 // -------------------------------------------------------------
-const baseDatosGuardias = {};
 const contadoresDesreserva = {};
 
-function obtenerOCrearMes(mes, año) {
+function generarPlantillaMes(mes, año) {
+    const oficiales = [];
+    const disponibles = [];
+    const totalDias = new Date(año, mes, 0).getDate();
+
+    const fechaObjMes = new Date(año, mes - 1, 1);
+    let nombreMes = fechaObjMes.toLocaleString('es-AR', { month: 'long' });
+    nombreMes = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
+
+    const strMes = String(mes).padStart(2, '0');
+
+    for (let dia = 1; dia <= totalDias; dia++) {
+        const strDia = String(dia).padStart(2, '0');
+        const fechaObj = new Date(año, mes - 1, dia, 12, 0, 0);
+
+        let diaNombre = fechaObj.toLocaleString('es-AR', { weekday: 'short', timeZone: 'America/Argentina/Buenos_Aires' });
+        diaNombre = diaNombre.replace('.', '');
+        diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
+
+        const fechaTexto = `${diaNombre} ${strDia}/${strMes}`;
+
+        oficiales.push({ id: dia, fecha: fechaTexto, estado: 'disponible', agente: null, reservadoEn: null });
+        disponibles.push({ id: dia, fecha: fechaTexto, estado: 'disponible', agente: null, reservadoEn: null });
+    }
+
+    return {
+        infoMes: { mesNombre: nombreMes, año: Number(año), totalDias, mesNumero: Number(mes) },
+        oficiales,
+        disponibles
+    };
+}
+
+// Función asíncrona que cruza la estructura del mes con las reservas de PostgreSQL
+async function obtenerDatosMesPersistidos(mes, año) {
     const clave = `${año}-${String(mes).padStart(2, '0')}`;
+    const datosMes = generarPlantillaMes(mes, año);
 
-    if (!baseDatosGuardias[clave]) {
-        const oficiales = [];
-        const disponibles = [];
-        const totalDias = new Date(año, mes, 0).getDate();
+    try {
+        const query = `
+            SELECT r.id_fecha, r.tipo_guardia, r.reservado_en,
+                   u.dni, u.jerarquia, u.apellido, u.nombre
+            FROM reservas r
+            JOIN usuarios u ON TRIM(r.dni_agente) = TRIM(u.dni)
+            WHERE r.clave_mes = $1
+        `;
+        const result = await pool.query(query, [clave]);
 
-        const fechaObjMes = new Date(año, mes - 1, 1);
-        let nombreMes = fechaObjMes.toLocaleString('es-AR', { month: 'long' });
-        nombreMes = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
-
-        const strMes = String(mes).padStart(2, '0');
-
-        for (let dia = 1; dia <= totalDias; dia++) {
-            const strDia = String(dia).padStart(2, '0');
-            const fechaObj = new Date(año, mes - 1, dia, 12, 0, 0);
-
-            let diaNombre = fechaObj.toLocaleString('es-AR', { weekday: 'short', timeZone: 'America/Argentina/Buenos_Aires' });
-            diaNombre = diaNombre.replace('.', '');
-            diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
-
-            const fechaTexto = `${diaNombre} ${strDia}/${strMes}`;
-
-            oficiales.push({ id: dia, fecha: fechaTexto, estado: 'disponible', agente: null, reservadoEn: null });
-            disponibles.push({ id: dia, fecha: fechaTexto, estado: 'disponible', agente: null, reservadoEn: null });
-        }
-
-        baseDatosGuardias[clave] = {
-            infoMes: { mesNombre: nombreMes, año: Number(año), totalDias, mesNumero: Number(mes) },
-            oficiales,
-            disponibles
-        };
+        result.rows.forEach(row => {
+            const lista = row.tipo_guardia === 'oficial' ? datosMes.oficiales : datosMes.disponibles;
+            const fechaItem = lista.find(item => item.id === row.id_fecha);
+            if (fechaItem) {
+                fechaItem.estado = 'reservado';
+                fechaItem.agente = {
+                    dni: row.dni,
+                    jerarquia: row.jerarquia,
+                    apellido: row.apellido,
+                    nombre: row.nombre
+                };
+                fechaItem.reservadoEn = row.reservado_en;
+            }
+        });
+    } catch (error) {
+        console.error('>>> Error al recuperar reservas de PostgreSQL:', error);
     }
 
-    if (!contadoresDesreserva[clave]) {
-        contadoresDesreserva[clave] = {};
-    }
-
-    return baseDatosGuardias[clave];
+    return datosMes;
 }
 
 // -------------------------------------------------------------
-// WEBSOCKETS EN TIEMPO REAL
+// WEBSOCKETS EN TIEMPO REAL CON PERSISTENCIA EN BD
 // -------------------------------------------------------------
 io.on('connection', (socket) => {
 
@@ -310,7 +329,6 @@ io.on('connection', (socket) => {
         }
 
         try {
-            // Verificar únicamente que el DNI exista
             const userRes = await pool.query('SELECT dni FROM usuarios WHERE TRIM(dni) = $1', [dniClean]);
 
             if (userRes.rows.length === 0) {
@@ -321,7 +339,6 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            // Actualizar la contraseña
             await pool.query('UPDATE usuarios SET pass = $1 WHERE TRIM(dni) = $2', [nuevaPassClean, dniClean]);
 
             socket.emit('resultadoReseteoPass', {
@@ -337,11 +354,15 @@ io.on('connection', (socket) => {
         }
     });
 
-    // OBTENER FECHAS
-    socket.on('obtenerFechas', (data) => {
+    // OBTENER FECHAS (Lectura desde PostgreSQL)
+    socket.on('obtenerFechas', async (data) => {
         const { mes, año, dni } = data;
-        const datosMes = obtenerOCrearMes(mes, año);
+        const datosMes = await obtenerDatosMesPersistidos(mes, año);
         const clave = `${año}-${String(mes).padStart(2, '0')}`;
+        
+        if (!contadoresDesreserva[clave]) {
+            contadoresDesreserva[clave] = {};
+        }
         const cancelaciones = contadoresDesreserva[clave][dni] || 0;
 
         socket.emit('cargarFechas', {
@@ -350,45 +371,64 @@ io.on('connection', (socket) => {
         });
     });
 
-    // SOLICITAR RESERVA
-    socket.on('solicitarReserva', (data) => {
-        const { idFecha, tipoGuardia, jerarquia, apellido, nombre, dni, mes, año } = data;
-        const datosMes = obtenerOCrearMes(mes, año);
-        const lista = tipoGuardia === 'oficial' ? datosMes.oficiales : datosMes.disponibles;
+    // SOLICITAR RESERVA (Escritura en PostgreSQL)
+    socket.on('solicitarReserva', async (data) => {
+        const { idFecha, tipoGuardia, dni, mes, año } = data;
+        const dniClean = String(dni).trim();
+        const clave = `${año}-${String(mes).padStart(2, '0')}`;
 
-        const yaTieneReserva = lista.some(item => item.agente && String(item.agente.dni) === String(dni));
-        if (yaTieneReserva) {
-            socket.emit('resultadoReserva', {
-                exito: false,
-                mensaje: `Ya posees una reserva de Guardia ${tipoGuardia === 'oficial' ? 'Oficial' : 'Disponible'} asignada en este mes.`
-            });
-            return;
-        }
+        try {
+            // 1. Verificar si el usuario ya posee una reserva de este tipo en el mes activo
+            const checkUser = `
+                SELECT id FROM reservas 
+                WHERE clave_mes = $1 AND tipo_guardia = $2 AND TRIM(dni_agente) = $3
+            `;
+            const checkUserRes = await pool.query(checkUser, [clave, tipoGuardia, dniClean]);
 
-        const fechaItem = lista.find(item => item.id === idFecha);
-        if (fechaItem && fechaItem.estado === 'disponible') {
-            fechaItem.estado = 'reservado';
-            fechaItem.agente = { dni, jerarquia, apellido, nombre };
-            fechaItem.reservadoEn = new Date();
+            if (checkUserRes.rows.length > 0) {
+                socket.emit('resultadoReserva', {
+                    exito: false,
+                    mensaje: `Ya posees una reserva de Guardia ${tipoGuardia === 'oficial' ? 'Oficial' : 'Disponible'} asignada en este mes.`
+                });
+                return;
+            }
+
+            // 2. Insertar en la base de datos
+            const insertQuery = `
+                INSERT INTO reservas (clave_mes, id_fecha, tipo_guardia, dni_agente)
+                VALUES ($1, $2, $3, $4)
+            `;
+            await pool.query(insertQuery, [clave, idFecha, tipoGuardia, dniClean]);
+
+            // 3. Recuperar el mes actualizado y notificar a todos los clientes
+            const datosActualizados = await obtenerDatosMesPersistidos(mes, año);
 
             socket.emit('resultadoReserva', { exito: true, mensaje: 'Reserva realizada con éxito.' });
-            io.emit('actualizarFechas', datosMes);
-        } else {
-            socket.emit('resultadoReserva', { exito: false, mensaje: 'La fecha seleccionada ya no se encuentra disponible.' });
+            io.emit('actualizarFechas', datosActualizados);
+
+        } catch (error) {
+            console.error('>>> Error al registrar reserva en PostgreSQL:', error);
+            socket.emit('resultadoReserva', {
+                exito: false,
+                mensaje: 'La fecha seleccionada ya no se encuentra disponible o fue ocupada por otro agente.'
+            });
         }
     });
 
-    // SOLICITAR DESRESERVA (CANCELACIÓN)
-    socket.on('solicitarDesreserva', (data) => {
+    // SOLICITAR DESRESERVA (Eliminación en PostgreSQL)
+    socket.on('solicitarDesreserva', async (data) => {
         const { idFecha, tipoGuardia, dni, mes, año } = data;
-        const datosMes = obtenerOCrearMes(mes, año);
+        const dniClean = String(dni).trim();
         const clave = `${año}-${String(mes).padStart(2, '0')}`;
 
-        if (!contadoresDesreserva[clave][dni]) {
-            contadoresDesreserva[clave][dni] = 0;
+        if (!contadoresDesreserva[clave]) {
+            contadoresDesreserva[clave] = {};
+        }
+        if (!contadoresDesreserva[clave][dniClean]) {
+            contadoresDesreserva[clave][dniClean] = 0;
         }
 
-        if (contadoresDesreserva[clave][dni] >= 3) {
+        if (contadoresDesreserva[clave][dniClean] >= 3) {
             socket.emit('resultadoDesreserva', {
                 exito: false,
                 mensaje: 'Has alcanzado el límite máximo de 3 cancelaciones permitidas para este mes.'
@@ -396,20 +436,26 @@ io.on('connection', (socket) => {
             return;
         }
 
-        const lista = tipoGuardia === 'oficial' ? datosMes.oficiales : datosMes.disponibles;
-        const fechaItem = lista.find(item => item.id === idFecha);
+        try {
+            const deleteQuery = `
+                DELETE FROM reservas 
+                WHERE clave_mes = $1 AND id_fecha = $2 AND tipo_guardia = $3 AND TRIM(dni_agente) = $4
+            `;
+            const deleteRes = await pool.query(deleteQuery, [clave, idFecha, tipoGuardia, dniClean]);
 
-        if (fechaItem && fechaItem.agente && String(fechaItem.agente.dni) === String(dni)) {
-            fechaItem.estado = 'disponible';
-            fechaItem.agente = null;
-            fechaItem.reservadoEn = null;
+            if (deleteRes.rowCount > 0) {
+                contadoresDesreserva[clave][dniClean] += 1;
+                const datosActualizados = await obtenerDatosMesPersistidos(mes, año);
 
-            contadoresDesreserva[clave][dni] += 1;
+                socket.emit('resultadoDesreserva', { exito: true, mensaje: 'La reserva ha sido cancelada satisfactoriamente.' });
+                io.emit('actualizarFechas', datosActualizados);
+            } else {
+                socket.emit('resultadoDesreserva', { exito: false, mensaje: 'No fue posible cancelar la reserva seleccionada.' });
+            }
 
-            socket.emit('resultadoDesreserva', { exito: true, mensaje: 'La reserva ha sido cancelada satisfactoriamente.' });
-            io.emit('actualizarFechas', datosMes);
-        } else {
-            socket.emit('resultadoDesreserva', { exito: false, mensaje: 'No fue posible cancelar la reserva seleccionada.' });
+        } catch (error) {
+            console.error('>>> Error al eliminar reserva en PostgreSQL:', error);
+            socket.emit('resultadoDesreserva', { exito: false, mensaje: 'Error interno al procesar la cancelación.' });
         }
     });
 });
