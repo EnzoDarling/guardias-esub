@@ -263,7 +263,7 @@
     const appContainer = document.getElementById('appContainer');
 
     // Inicialización del mes y año actual por defecto
-    const hoy = new Date();
+    const fechaProxima = new Date();
     fechaProxima.setMonth(fechaProxima.getMonth() + 1);
     // getMonth() devuelve valores de 0 a 11, por lo que sumamos 1
     selectMes.value = hoy.getMonth() + 1;
