@@ -104,7 +104,7 @@ app.get('/admin/exportar-excel', seguridadAdmin, async (req, res) => {
         const worksheet = workbook.addWorksheet(`Guardias ${claveMes}`);
 
         worksheet.columns = [
-            { header: 'Día', key: 'dia', width: 10 },
+            { header: 'Fecha Guardia', key: 'dia', width: 15 },
             { header: 'Tipo de Guardia', key: 'tipo', width: 20 },
             { header: 'Jerarquía', key: 'jerarquia', width: 18 },
             { header: 'Apellido', key: 'apellido', width: 20 },
@@ -120,9 +120,15 @@ app.get('/admin/exportar-excel', seguridadAdmin, async (req, res) => {
             fgColor: { argb: '0D6EFD' }
         };
 
+        const strMes = String(mes).padStart(2, '0');
+
         result.rows.forEach(row => {
+            const strDia = String(row.id_fecha).padStart(2, '0');
+            // Construimos la fecha en formato DD/MM/YYYY
+            const fechaGuardia = `${strDia}/${strMes}/${año}`;
+
             worksheet.addRow({
-                dia: row.id_fecha,
+                dia: fechaGuardia,
                 tipo: row.tipo_guardia === 'oficial' ? 'Guardia Oficial' : 'Guardia Disponible',
                 jerarquia: row.jerarquia || '',
                 apellido: row.apellido || '',
